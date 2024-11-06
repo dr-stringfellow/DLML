@@ -9,8 +9,24 @@ from nflows.nn.nets import ResidualNet
 def linear_noise_schedule(timesteps, start=1e-4, end=2e-2):
     return torch.linspace(start, end, timesteps)
 
-def sample_step(model, x, t, condition, alpha_bar):
+def sample_step_inference(model, x, t, condition, alpha_bar):
     noise_pred = model(x, t, condition)
+    epsilon = 1e-5  # Small constant to stabilize
+    # Modify to avoid near-zero values in alpha_bar[t] and (1 - alpha_bar[t])
+    x_new = (x - noise_pred * (1 - alpha_bar[t] + epsilon).sqrt()) / (alpha_bar[t] + epsilon).sqrt()
+    
+    # Optional: Clip values to ensure stability
+    #x_new = torch.clamp(x_new, min=-1e2, max=1e2)  # Adjust these bounds as needed
+    return x_new
+
+def sample_step(model, x, t, condition, alpha_bar):
+    
+    noise_pred = model(x, t, condition)
+    print("XXXXXXX Nominator")
+    print((x - noise_pred * (1 - alpha_bar[t]).sqrt()))
+    print("XXXXXXX Denominator")
+    print(alpha_bar[t].sqrt())
+    
     return (x - noise_pred * (1 - alpha_bar[t]).sqrt()) / alpha_bar[t].sqrt()
 
 def diffusion_loss(model, x, condition, noise_schedule, timesteps):

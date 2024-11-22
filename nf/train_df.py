@@ -78,7 +78,7 @@ def train_diffusion_model(df_model, data_train, context_train, data_val, context
 
         # Save models
         state_dicts = {'model':df_model.state_dict(),'opt':optimizer.state_dict(),'lr':scheduler.state_dict()}
-        torch.save(state_dicts, f'models_diffusion/epoch-{epoch}.pt')
+        torch.save(state_dicts, f'models_diffusion_big/epoch-{epoch}.pt')
     
     # Save loss data to a CSV file
     df = pd.DataFrame({"loss_train": all_losses_train, "loss_val": all_losses_val})
@@ -91,8 +91,8 @@ def train_diffusion_model(df_model, data_train, context_train, data_val, context
     plt.legend()
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
-    plt.savefig("/web/bmaier/public_html/delight/nf/loss.png",bbox_inches='tight',dpi=300)
-    plt.savefig("/web/bmaier/public_html/delight/nf/loss.pdf",bbox_inches='tight')
+    plt.savefig("/web/bmaier/public_html/delight/dm/loss_big.png",bbox_inches='tight',dpi=300)
+    plt.savefig("/web/bmaier/public_html/delight/dm/loss_big.pdf",bbox_inches='tight')
     
     
 def validate():
@@ -106,16 +106,15 @@ def validate():
 def concat_files(filelist,cutoff):
     all_data = None
     for i,f in tqdm.tqdm(enumerate(filelist), total=len(filelist), desc="Loading data into array"):
-        #if "lin" in f:
-        #    continue
-        #if i > 40:
-        #    break
         # Load file and retrieve all four channels
         data = np.load(f)[:, :4]
         
         # Calculate energy as the sum of all channels
         energy = np.sum(data, axis=1).reshape(-1, 1)
 
+        if energy[0] < cutoff:
+            continue
+        
         # Filter out entries below the cutoff energy
         valid_entries = energy >= cutoff
         data = data[valid_entries.ravel()]
@@ -123,19 +122,24 @@ def concat_files(filelist,cutoff):
 
         # Concatenate data if not empty
         if all_data is None:
-            all_data = np.concatenate((data, energy), axis=1)
+            all_data = np.concatenate((data/energy, energy/1000000), axis=1)
         else:
-            all_data = np.concatenate((all_data, np.concatenate((data, energy), axis=1)), axis=0)
-    
-    return all_data
+            all_data = np.concatenate((all_data, np.concatenate((data/energy, energy/1000000), axis=1)), axis=0)
 
+    idx = [i for i in range(len(all_data))]
+    print("Number of events:", len(idx))
+    random.shuffle(idx)
+    all_data = all_data[idx][:50000]
+    #all_data = all_data[idx]
+
+    return all_data
 
 # Example usage
 if __name__ == "__main__":
     logger = setup_logger()
 
     # Loading data
-    cutoff_e = 0. # eV. Ingnore interactions below that.
+    cutoff_e = 100000. # eV. Ingnore interactions below that.
     logger.info(f'Load data for evens with energy larger than {cutoff_e} eV.')
     files_train = glob.glob("/ceph/bmaier/delight/ml/nf/data/train/*npy")
     files_val = glob.glob("/ceph/bmaier/delight/ml/nf/data/val/*npy")
@@ -143,22 +147,22 @@ if __name__ == "__main__":
     random.shuffle(files_train)
     data_train = concat_files(files_train,cutoff_e)
     data_val = concat_files(files_val,cutoff_e)
-        
+    
     # Separate the data into the first 4 dimensions (input) and the 5th dimension (context)
     data_train_4d = data_train[:, :4]
     context_train_5d = data_train[:, 4:5]
     data_val_4d = data_val[:, :4]
     context_val_5d = data_val[:, 4:5]
-
+    
     # Initialize the conditional flow model (input dimension 4, context dimension 1, hidden dimension 64, 5 layers)
     data_dim = 4
     condition_dim = 1
-    timesteps = 1000
-    batch_size = 128
-    learning_rate = 1e-3
-    epochs = 150
-    noise_schedule = linear_noise_schedule(timesteps).to('cuda')
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    timesteps = 25
+    batch_size = 1024
+    learning_rate = 1e-2
+    epochs = 100
+    noise_schedule = linear_noise_schedule(timesteps).to('cuda:1')
+    device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
     logger.info(f'Training on {device}')
     
     # Create and move the model to the appropriate device

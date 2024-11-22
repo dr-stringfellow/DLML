@@ -49,26 +49,7 @@ def train_conditional_flow_model(flow_model, data_train, context_train, data_val
     # Train
     all_losses_train = []
     all_losses_val = []
-    for epoch in range(num_epochs):
-        '''
-        if len(os.listdir('models/')) != 0 and not os.path.isfile(f'models/epoch-{epoch}.pt'):
-            # Previous training exists but starting from new epoch
-            print(f"Re-starting training from epoch {epoch-1}")
-            flow_model.load_state_dict(torch.load(f'models/epoch-{epoch-1}.pt')['model'])
-            optimizer.load_state_dict(torch.load(f'models/epoch-{epoch-1}.pt')['opt'])
-            scheduler.load_state_dict(torch.load(f'models/epoch-{epoch-1}.pt')['lr'])
-            #all_losses_train = pd.read_csv("loss.csv")["loss_train"].values.tolist()
-            #all_losses_val = pd.read_csv("loss.csv")["loss_val"].values.tolist()
-        elif os.path.isfile(f'models/epoch-{epoch}.pt'):
-            # Looking at already existing checkpoint, skip
-            continue
-        elif len(os.listdir('models/')) == 0:
-            # Fresh training
-            pass
-        else:
-            raise NotImplementedError
-        '''
-        
+    for epoch in range(num_epochs):        
         total_loss_train = 0
         total_loss_val = 0
         flow_model.train()
@@ -123,19 +104,38 @@ def validate():
 
 
 def concat_files(filelist,cutoff):
-    e_array = np.geomspace(10, 1e6, 500)
     all_data = None
-    for f in tqdm.tqdm(filelist, desc="Loading data into array"):
-        idx = int(f.split("NR_final_")[-1].split("_")[0])
-        if e_array[idx] < cutoff:
+    for i,f in tqdm.tqdm(enumerate(filelist), total=len(filelist), desc="Loading data into array"):
+        #if "lin" in f:
+        #    continue
+        #if i > 40:
+        #    break
+        # Load file and retrieve all four channels
+        data = np.load(f)[:, :4]
+        
+        # Calculate energy as the sum of all channels
+        energy = np.sum(data, axis=1).reshape(-1, 1)
+
+        if energy[0] < cutoff:
             continue
+        
+        # Filter out entries below the cutoff energy
+        valid_entries = energy >= cutoff
+        data = data[valid_entries.ravel()]
+        energy = energy[valid_entries.ravel()]
+
+        # Concatenate data if not empty
         if all_data is None:
-            all_data = np.load(f)[:, :4]
+            all_data = np.concatenate((data/energy, energy/1000000), axis=1)
         else:
-            all_data = np.concatenate((all_data, np.load(f)[:, :4]))
-    energy = np.sum(all_data, axis=1).reshape(-1, 1)
+            all_data = np.concatenate((all_data, np.concatenate((data/energy, energy/1000000), axis=1)), axis=0)
+
+    idx = [i for i in range(len(all_data))]
+    print("Number of events:", len(idx))
+    all_data = all_data[idx][:50000]
     
-    return np.concatenate((all_data, energy), axis=1)
+    return all_data
+
 
 
 # Example usage

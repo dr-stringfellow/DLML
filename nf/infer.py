@@ -5,6 +5,7 @@ hep.style.use(hep.style.ATLAS)
 import numpy as np
 import torch
 from model import ConditionalNormalizingFlowModel  # Importing the model from model.py
+import time
 
 if __name__ == "__main__":
     # Set up the model
@@ -12,7 +13,8 @@ if __name__ == "__main__":
     context_dim = 1
     hidden_dim = 64
     num_layers = 5
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    #device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = 'cpu'
 
     # Instantiate the model architecture
     flow_model = ConditionalNormalizingFlowModel(input_dim, context_dim, hidden_dim, num_layers, device).to(device)
@@ -28,11 +30,22 @@ if __name__ == "__main__":
     # Interesting values to sample: 1.14847155e+01, 1.00462506e+02, 1.00927151e+03, 1.01393946e+04, 9.95396231e+04
     energies = np.geomspace(10, 1e6, 500)
 
+    energies = [10., 100., 1.e3, 1.e4, 1.e5, 1.e6]
+
+    for i,e in enumerate(energies):
+        fixed_value_5th_dim = torch.tensor([[float(e)]], device=device)
+        start = time.time()
+        gen = flow_model.sample(num_samples=100000, context=fixed_value_5th_dim)
+        end = time.time()
+        print(e,end - start)
+
+    exit(1)
+    
     for i,e in enumerate(energies):
         if i % 50 != 0:
             continue
 
-        print(f"Loading simulated data corresponding to index {i}")
+        #print(f"Loading simulated data corresponding to index {i}")
 
         for f in glob.glob(f"/ceph/bmaier/delight/ml/nf/data/NR_final_{i}_*.npy"):
             sim = None
@@ -41,10 +54,12 @@ if __name__ == "__main__":
             else:
                 sim = np.concatenate((sim, np.load(f)[:, :4]))                                    
             
-        print(f"Generating samples for {e} eV (index {i})")
+        #print(f"Generating samples for {e} eV (index {i})")
         
         fixed_value_5th_dim = torch.tensor([[float(e)]], device=device)
-        gen = flow_model.sample(num_samples=10000, context=fixed_value_5th_dim)
+        start = time.time()
+        gen = flow_model.sample(num_samples=100000, context=fixed_value_5th_dim)
+        end = time.time()
         gen = np.squeeze(gen.cpu().detach().numpy(), axis=0)
         #print(gen)
 

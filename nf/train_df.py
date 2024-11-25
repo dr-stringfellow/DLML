@@ -78,7 +78,7 @@ def train_diffusion_model(df_model, data_train, context_train, data_val, context
 
         # Save models
         state_dicts = {'model':df_model.state_dict(),'opt':optimizer.state_dict(),'lr':scheduler.state_dict()}
-        torch.save(state_dicts, f'models_diffusion_big/epoch-{epoch}.pt')
+        torch.save(state_dicts, f'models_diffusion_max/epoch-{epoch}.pt')
     
     # Save loss data to a CSV file
     df = pd.DataFrame({"loss_train": all_losses_train, "loss_val": all_losses_val})
@@ -91,8 +91,8 @@ def train_diffusion_model(df_model, data_train, context_train, data_val, context
     plt.legend()
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
-    plt.savefig("/web/bmaier/public_html/delight/dm/loss_big.png",bbox_inches='tight',dpi=300)
-    plt.savefig("/web/bmaier/public_html/delight/dm/loss_big.pdf",bbox_inches='tight')
+    plt.savefig("/web/bmaier/public_html/delight/dm/loss_big_max.png",bbox_inches='tight',dpi=300)
+    plt.savefig("/web/bmaier/public_html/delight/dm/loss_big_max.pdf",bbox_inches='tight')
     
     
 def validate():
@@ -103,7 +103,7 @@ def validate():
             loss = -flow_model(batch_data, batch_context).mean()
 
 
-def concat_files(filelist,cutoff):
+def concat_files(filelist,cutoff_min,cutoff_max):
     all_data = None
     for i,f in tqdm.tqdm(enumerate(filelist), total=len(filelist), desc="Loading data into array"):
         # Load file and retrieve all four channels
@@ -112,11 +112,14 @@ def concat_files(filelist,cutoff):
         # Calculate energy as the sum of all channels
         energy = np.sum(data, axis=1).reshape(-1, 1)
 
-        if energy[0] < cutoff:
+        if energy[0] < cutoff_min:
             continue
-        
+
+        if energy[0] > cutoff_max:
+            continue
+
         # Filter out entries below the cutoff energy
-        valid_entries = energy >= cutoff
+        valid_entries = energy >= 0
         data = data[valid_entries.ravel()]
         energy = energy[valid_entries.ravel()]
 
@@ -129,8 +132,8 @@ def concat_files(filelist,cutoff):
     idx = [i for i in range(len(all_data))]
     print("Number of events:", len(idx))
     random.shuffle(idx)
-    all_data = all_data[idx][:50000]
-    #all_data = all_data[idx]
+    #all_data = all_data[idx][:50000]
+    all_data = all_data[idx]
 
     return all_data
 
@@ -139,14 +142,15 @@ if __name__ == "__main__":
     logger = setup_logger()
 
     # Loading data
-    cutoff_e = 100000. # eV. Ingnore interactions below that.
-    logger.info(f'Load data for evens with energy larger than {cutoff_e} eV.')
+    cutoff_min_e = 0. # eV. Ingnore interactions below that.
+    cutoff_max_e = 1000. # eV. Ingnore interactions higher than that.
+    logger.info(f'Load data for evens with energy larger than {cutoff_min_e} and smaller than {cutoff_max_e} eV.')
     files_train = glob.glob("/ceph/bmaier/delight/ml/nf/data/train/*npy")
     files_val = glob.glob("/ceph/bmaier/delight/ml/nf/data/val/*npy")
     random.seed(123)
     random.shuffle(files_train)
-    data_train = concat_files(files_train,cutoff_e)
-    data_val = concat_files(files_val,cutoff_e)
+    data_train = concat_files(files_train,cutoff_min_e,cutoff_max_e)
+    data_val = concat_files(files_val,cutoff_min_e,cutoff_max_e)
     
     # Separate the data into the first 4 dimensions (input) and the 5th dimension (context)
     data_train_4d = data_train[:, :4]
@@ -160,7 +164,7 @@ if __name__ == "__main__":
     timesteps = 25
     batch_size = 1024
     learning_rate = 1e-2
-    epochs = 100
+    epochs = 150
     noise_schedule = linear_noise_schedule(timesteps).to('cuda:1')
     device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
     logger.info(f'Training on {device}')

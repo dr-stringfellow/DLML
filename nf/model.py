@@ -20,10 +20,11 @@ def sample_step(model, x, t, condition, alpha_bar):
     return (x - noise_pred * (1 - alpha_bar[t]).sqrt()) / alpha_bar[t].sqrt()
 
 
-def diffusion_loss(model, x, condition, noise_schedule, timesteps):
+def diffusion_loss(model, x, condition, noise_schedule, timesteps, backwards=False):
     # Choose a random timestep
     t = torch.randint(0, timesteps, (x.shape[0],)).to(x.device)
     noise = torch.randn_like(x).to(x.device)
+    #noise = (torch.randn_like(x)*torch.tensor([10.]).to(x.device)).to(x.device)
     alpha_bar = torch.cumprod(1 - noise_schedule, dim=0)
     
     # Ensure alpha_bar[t] has an extra dimension to match x and noise
@@ -34,7 +35,24 @@ def diffusion_loss(model, x, condition, noise_schedule, timesteps):
     
     # Calculate model prediction and loss
     noise_pred = model(x_noisy, t, condition)
-    return ((noise - noise_pred) ** 2).mean()
+    forward_loss = ((noise - noise_pred) ** 2).mean()
+
+    if backwards:
+        # Reverse process loss (reconstruct original data through reverse denoising)
+        reverse_loss = 0
+        x_reverse = x_noisy.clone()
+        for step in reversed(range(timesteps)):
+            # Simulate reverse process step
+            reverse_t = torch.full((x.shape[0],), step, dtype=torch.long).to(x.device)
+            alpha_bar_reverse = alpha_bar[reverse_t].unsqueeze(-1)
+            x_reverse = (x_reverse - model(x_reverse, reverse_t, condition) * (1 - alpha_bar_reverse).sqrt()) / alpha_bar_reverse.sqrt()
+            # Compare reconstructed input with original data
+            reverse_loss = ((x_reverse - x) ** 2).mean()
+            
+    if not backwards:
+        return forward_loss
+    else:
+        return forward_loss + reverse_loss
     #return ((noise - noise_pred) ** 2).sum()
 
 
@@ -71,11 +89,12 @@ class SelfAttention(nn.Module):
 
 
 class AttentionDiffusionModel(nn.Module):
-    def __init__(self, data_dim, condition_dim, timesteps, device):
+    def __init__(self, data_dim, condition_dim, timesteps, device, pos_out=False):
         super(AttentionDiffusionModel, self).__init__()
         self.timesteps = timesteps
         self.data_dim = data_dim
         self.condition_dim = condition_dim
+        self.pos_out = pos_out
         self.device = device  # Store the device
         
         # Network layers
@@ -95,6 +114,9 @@ class AttentionDiffusionModel(nn.Module):
         x = torch.relu(self.fc1(x))
         x = torch.relu(self.fc2(x))
         x = self.fc3(x)
+        if self.pos_out:
+            x = torch.relu(x)
+            
         return x
 
 
